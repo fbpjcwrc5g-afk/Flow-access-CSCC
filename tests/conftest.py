@@ -7,9 +7,12 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
+from flow_access.clinical import TransportCriteria
 from flow_access.fhir.auth import BackendServicesAuth
 from flow_access.fhir.client import FhirClient
+from flow_access.packets import PacketBuilder
 from flow_access.pathway import PathwayClassifier
+from flow_access.plans import PlanDirectory
 from flow_access.service import PathwayService
 from flow_access.settings import CONFIG_DIR
 from flow_access.store import Store
@@ -130,7 +133,19 @@ class FakeEpic:
             return httpx.Response(200, json=res) if res else httpx.Response(404)
         if parts[0] == "Coverage":
             return self._coverage_search(request)
+        if parts[0] in ("Condition", "ServiceRequest"):
+            return self._subject_search(parts[0], request)
         return httpx.Response(404)
+
+    def _subject_search(self, rtype, request):
+        pid = request.url.params.get("patient")
+        category = request.url.params.get("category")
+        matches = [
+            r for (t, _), r in self.resources.items()
+            if t == rtype and r["subject"]["reference"] == f"Patient/{pid}"
+            and (not category or any(c["coding"][0]["code"] == category for c in r.get("category", [])))
+        ]
+        return httpx.Response(200, json={"resourceType": "Bundle", "entry": [{"resource": r} for r in matches]})
 
     def _token(self, request):
         self.token_requests += 1
@@ -191,5 +206,52 @@ def sink():
 
 
 @pytest.fixture
-def service(classifier, engine, store, sink, fhir):
-    return PathwayService(classifier, engine, store, [sink], fhir=fhir)
+def packets():
+    return PacketBuilder(
+        PlanDirectory.from_files(CONFIG_DIR / "plans.yaml", CONFIG_DIR / "contracted_agencies.csv"),
+        TransportCriteria.from_file(CONFIG_DIR / "transport_criteria.yaml"),
+    )
+
+
+@pytest.fixture
+def service(classifier, engine, store, sink, packets, fhir):
+    return PathwayService(classifier, engine, store, [sink], packets, fhir=fhir)
+
+
+def condition(cid, code, display, category="encounter-diagnosis", status="active", encounter_id=None):
+    cond = {
+        "resourceType": "Condition",
+        "id": cid,
+        "clinicalStatus": {"coding": [{"code": status}]},
+        "verificationStatus": {"coding": [{"code": "confirmed"}]},
+        "category": [{"coding": [{"code": category}]}],
+        "code": {"coding": [{"system": "http://hl7.org/fhir/sid/icd-10-cm", "code": code, "display": display}]},
+        "subject": {"reference": "Patient/p1"},
+    }
+    if encounter_id:
+        cond["encounter"] = {"reference": f"Encounter/{encounter_id}"}
+    return cond
+
+
+def order(oid, text, status="active", requester="dr1", encounter_id="e1", authored="2026-11-01T10:00:00Z"):
+    return {
+        "resourceType": "ServiceRequest",
+        "id": oid,
+        "status": status,
+        "intent": "order",
+        "code": {"text": text},
+        "subject": {"reference": "Patient/p1"},
+        "encounter": {"reference": f"Encounter/{encounter_id}"},
+        "requester": {"reference": f"Practitioner/{requester}"},
+        "authoredOn": authored,
+    }
+
+
+def practitioner(pid="dr1", npi="1234567893"):
+    return {
+        "resourceType": "Practitioner",
+        "id": pid,
+        "name": [{"use": "official", "family": "Rivera", "given": ["Ana"], "prefix": ["Dr."]}],
+        "identifier": [{"system": "http://hl7.org/fhir/sid/us-npi", "value": npi}],
+        "telecom": [{"system": "phone", "value": "213-555-0100"}],
+    }

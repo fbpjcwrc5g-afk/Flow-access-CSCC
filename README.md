@@ -44,6 +44,65 @@ payer admission notifications, and financial counseling referrals.
 6. **Dispatch.** Each task fires once per rule, patient, and encounter. If delivery fails, the claim is
    released so the next notification or poll retries it.
 
+## Priority plans, referral packets, and PCS forms
+
+The priority plans are **L.A. Care**, **Blue Shield of California Promise**, **Molina**, and **Optum**.
+They are defined in `src/flow_access/config/plans.yaml` and identified from the Coverage payor, plan, and
+group names. Optum is modeled as a *delegated medical group*. When a patient's coverage shows both a
+health plan and Optum (for example L.A. Care with Optum as the IPA), Optum's documents and network are
+used, because the delegated group usually owns utilization management.
+
+Once a plan is identified:
+
+- **Admission** to inpatient or observation creates a *Start health plan discharge planning packet*
+  task carrying the plan's utilization management contact.
+- **Post-acute orders** in Epic (ServiceRequest) are matched by keyword to home health, SNF, DME, or
+  transportation. Each creates a task with the plan's **required documents** and **contracted
+  agencies** for that service.
+- **Transportation** orders also produce a pre-filled **Physician Certification Statement (PCS)**:
+  - **Member details:** name, date of birth, Medi-Cal CIN / plan member ID (`Coverage.subscriberId`),
+    MRN, and contact information.
+  - **Diagnoses:** active ICD-10-CM diagnoses, with current-encounter diagnoses first. Resolved and
+    refuted Conditions are excluded.
+  - **Clinical justification:** built only from chart-coded findings listed in `transport_criteria.yaml`,
+    such as hemiplegia, wheelchair dependence, bed confinement, or oxygen dependence. These also suggest
+    a minimum mode (wheelchair van, litter van, or ambulance). If no qualifying finding is coded, the
+    justification is left for the prescriber and no mode is suggested.
+  - **Prescriber:** the ordering provider's name and NPI, taken from the order's requester.
+  - **Dates:** one-time trips default to today. Recurring trips are capped at 12 months.
+  - The form is always marked **DRAFT**. It lists what is still missing and is never signed on a
+    provider's behalf.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /patients/{id}/packet` | Full packet from live Epic data. Optional body: `{"needs": [...], "transport": {...}}` |
+| `POST /patients/{id}/pcs?format=html\|json\|pdf` | Pre-filled PCS form (`pdf` requires the plan's fillable PDF to be configured) |
+| `POST /packet/bundle`, `POST /pcs/bundle` | The same, from a supplied FHIR Bundle |
+
+`transport` accepts `mode`, `start_date`, `end_date`, `trip_type` (`one_way`, `round_trip`, `recurring`),
+`frequency`, `origin`, `destination`, `reason`, and `additional_limitations`.
+
+```bash
+flow-access packet examples/la_care_stroke_discharge.json --pcs-html pcs.html
+```
+
+### What your team needs to configure
+
+- **`contracted_agencies.csv`**: replace the `EXAMPLE` rows with your contracted home health agencies,
+  SNFs, and DME suppliers for each plan (`plan_id, service, name, phone, fax, address, service_area, notes`).
+  Case management leadership can maintain this file without code changes.
+- **`plans.yaml`**:
+  - Fill in each `CONFIGURE` value: UM and transportation contacts, plan-specific documents, and keywords
+    matching how the plans are named in your Epic payor and plan records.
+  - To output each plan's official PCS PDF, save the fillable PDF and set `pcs_form.template_pdf`.
+  - Map the PDF's field names to PCS data paths in `field_map`, for example
+    `{"Member Name": "patient.name", "CIN": "patient.member_id", "Dx": "diagnoses", "Justification": "clinical_justification"}`.
+- **`transport_criteria.yaml`**: have your medical director or UM team review the ICD-10 criteria and
+  suggested minimum modes.
+- **Product lines** in `pathway_rules.yaml`, for example L.A. Care Medicare Plus and Molina Medicare
+  Complete Care treated as dual eligible, and L.A. Care Covered treated as commercial. Confirm these
+  against your payor build.
+
 ## Quick start (no Epic connection needed)
 
 ```bash
@@ -74,9 +133,11 @@ curl -X POST localhost:8000/evaluate/bundle -H 'content-type: application/json' 
 ## Connecting to Epic
 
 1. **Register a Backend Systems app** on [Epic on FHIR](https://fhir.epic.com/) (or through your
-   organization's Epic App Orchard / Showroom process). Request read access to `Patient`, `Coverage`, and
-   `Encounter` (R4), plus `Group` Bulk Data `$export` if you use polling. Add `Task.Create` only if you
-   plan to use the `fhir_task` sink.
+   organization's Epic Showroom process). Request R4 read access to `Patient`, `Coverage`, `Encounter`,
+   `Condition`, `ServiceRequest`, and `Practitioner`, plus `Group` Bulk Data `$export` if you use polling.
+   Add `Task.Create` only if you plan to use the `fhir_task` sink. Condition, ServiceRequest, and
+   Practitioner are optional: without them, pathway workflows still run, but packets have no detected
+   orders and the PCS form has no diagnoses or prescriber.
 2. **Create a signing key** with `flow-access generate-key --out epic_private_key.pem`. Register the
    public key, or host `/.well-known/jwks.json` and register that URL as the JWK Set URL.
 3. **Have your Epic analysts** activate the client ID in your environment, map it to a background user,
@@ -100,6 +161,7 @@ curl -X POST localhost:8000/evaluate/bundle -H 'content-type: application/json' 
 | `FLOW_TASK_WEBHOOK_URL` / `FLOW_TASK_WEBHOOK_TOKEN` | Target for the `webhook` sink (care management platform, integration engine) |
 | `FLOW_DB_PATH` | SQLite file for de-duplication, pathway history, and the polling cursor |
 | `FLOW_PATHWAY_RULES_PATH` / `FLOW_WORKFLOW_RULES_PATH` | Override the bundled YAML rules |
+| `FLOW_PLANS_PATH` / `FLOW_AGENCIES_PATH` / `FLOW_TRANSPORT_CRITERIA_PATH` | Override plan profiles, contracted agencies, and PCS criteria |
 
 ## Customizing the rules
 
@@ -119,7 +181,10 @@ curl -X POST localhost:8000/evaluate/bundle -H 'content-type: application/json' 
 - Logs contain FHIR IDs, rule IDs, and pathways, but no names or demographics.
 - Inbound notifications require a bearer token, compared in constant time. Private keys and `.env`
   files are git-ignored.
-- `/evaluate/bundle`, `/patients/{id}/evaluate`, and `/tasks` have no end-user authentication. Put them
+- PCS forms and packets contain PHI by design (name, DOB, member ID, diagnoses). Serve them only to
+  authorized case management staff.
+- `/evaluate/bundle`, `/patients/{id}/evaluate`, `/tasks`, and the packet and PCS endpoints have no
+  end-user authentication. Put them
   behind your API gateway or SSO before exposing them outside a trusted network.
 
 ## Project layout
@@ -130,6 +195,11 @@ src/flow_access/
   fhir/client.py     FHIR R4 reads, paged search, Bulk Data $export
   fhir/extract.py    Field extraction from Epic resources
   pathway.py         Insurance pathway classifier
+  plans.py           Plan / delegated group profiles, documents, contracted agencies
+  clinical.py        ICD-10 diagnoses, post-acute need detection, transport criteria
+  pcs.py             Pre-filled PCS form: HTML rendering and plan PDF filling
+  packets.py         Per-need referral packets
+  templates/         PCS form HTML template
   workflows.py       Encounter events and the workflow rules engine
   service.py         Orchestration, notification parsing, bulk polling
   sinks.py           Log, webhook, and FHIR Task outputs

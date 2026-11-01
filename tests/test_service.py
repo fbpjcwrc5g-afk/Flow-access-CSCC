@@ -30,12 +30,12 @@ def test_pathway_change_triggers_review(service, sink):
     assert result.tasks[0].pathway.value == "medicare_traditional"
 
 
-def test_failed_sink_releases_claim_for_retry(classifier, engine, store):
+def test_failed_sink_releases_claim_for_retry(classifier, engine, store, packets):
     context = ctx([coverage("c1", "Aetna", code="5")], [encounter()])
     with pytest.raises(RuntimeError):
-        PathwayService(classifier, engine, store, [RecordingSink(fail=True)]).evaluate(context)
+        PathwayService(classifier, engine, store, [RecordingSink(fail=True)], packets).evaluate(context)
     good = RecordingSink()
-    PathwayService(classifier, engine, store, [good]).evaluate(context)
+    PathwayService(classifier, engine, store, [good], packets).evaluate(context)
     assert [t.rule_id for t in good.sent] == ["managed-care-admission-notification"]
 
 
