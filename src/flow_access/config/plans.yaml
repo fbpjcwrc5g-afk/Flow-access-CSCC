@@ -1,0 +1,99 @@
+# Health plan and delegated medical group profiles that drive plan-specific case management.
+#
+# A profile matches when any of its `match` keywords appears (case-insensitive) in an active
+# Coverage's payor name, plan/group names, or type text. A patient can match a health plan AND a
+# delegated medical group (for example Blue Shield Promise with Optum as the delegated IPA). In that
+# case, the delegated group's documents and agencies are used, because the delegated group usually
+# owns utilization management and its own contracted network.
+#
+# Contracted agencies are maintained separately in contracted_agencies.csv.
+#
+# Everything marked CONFIGURE must be confirmed against your current plan contracts, provider
+# manuals, and delegation agreements before production use.
+
+defaults:
+  # Active Epic orders (ServiceRequest) whose text contains these keywords create a post-acute need.
+  # Checked in this order; each order maps to one need ("wheelchair van" is transportation, not DME).
+  need_keywords:
+    transportation: ["transport", "transportation", "ambulance", "gurney", "litter van", "wheelchair van",
+                     "nemt", "non-emergency medical transportation"]
+    snf: ["skilled nursing", "snf", "subacute", "sub-acute", "nursing facility", "nursing home"]
+    home_health: ["home health", "home care", "home nursing", "home pt", "home physical therapy",
+                  "home infusion"]
+    dme: ["dme", "durable medical equipment", "wheelchair", "walker", "hospital bed", "commode",
+          "oxygen concentrator", "home oxygen", "cpap", "bipap", "hoyer lift", "shower chair", "cane"]
+  documents:
+    home_health:
+      - Signed home health order/referral with ICD-10 diagnoses and skilled need
+      - Face-to-face encounter documentation related to the primary reason for home health
+      - History & physical or discharge summary
+      - Current medication list
+      - Plan prior authorization request
+    snf:
+      - Plan prior authorization request
+      - History & physical and most recent progress notes
+      - PT/OT evaluations with current functional level
+      - Current medication list / MAR
+      - PASRR Level I screening
+      - TB screening result
+      - Face sheet with insurance and member ID
+    dme:
+      - Signed DME order with ICD-10 diagnosis, HCPCS item, and length of need
+      - Clinical notes supporting medical necessity
+      - Plan prior authorization request
+      - "Oxygen only: qualifying oxygen saturation results"
+    transportation:
+      - Physician Certification Statement (PCS) form signed by the prescribing provider
+      - Plan transportation authorization, if required for the mode requested
+
+plans:
+  - id: la_care
+    display_name: L.A. Care Health Plan
+    role: health_plan
+    match: ["l.a. care", "la care", "l a care", "lacare"]
+    authorization_contact: "CONFIGURE: L.A. Care UM phone/fax or portal"
+    transportation_contact: "CONFIGURE: L.A. Care NEMT/transportation vendor"
+    pcs_form:
+      name: L.A. Care Physician Certification Statement (PCS)
+      # Path to the plan's fillable PDF. When set, /pcs?format=pdf fills it using field_map.
+      template_pdf: null
+      field_map: {}
+    documents: {}
+
+  - id: blue_shield_promise
+    display_name: Blue Shield of California Promise Health Plan
+    role: health_plan
+    match: ["blue shield promise", "blue shield of california promise", "bsc promise"]
+    authorization_contact: "CONFIGURE: Blue Shield Promise UM phone/fax or portal"
+    transportation_contact: "CONFIGURE: Blue Shield Promise NEMT/transportation vendor"
+    pcs_form:
+      name: Blue Shield Promise Physician Certification Statement (PCS)
+      template_pdf: null
+      field_map: {}
+    documents: {}
+
+  - id: molina
+    display_name: Molina Healthcare of California
+    role: health_plan
+    match: ["molina"]
+    authorization_contact: "CONFIGURE: Molina UM phone/fax or portal"
+    transportation_contact: "CONFIGURE: Molina NEMT/transportation vendor"
+    pcs_form:
+      name: Molina Physician Certification Statement (PCS)
+      template_pdf: null
+      field_map: {}
+    documents: {}
+
+  - id: optum
+    display_name: Optum (delegated medical group)
+    role: delegated_group
+    match: ["optum"]
+    authorization_contact: "CONFIGURE: Optum UM / hospitalist case management line"
+    transportation_contact: "CONFIGURE: transportation vendor per health plan delegation"
+    pcs_form:
+      name: Physician Certification Statement (PCS), health plan version
+      template_pdf: null
+      field_map: {}
+    documents:
+      snf:
+        - "CONFIGURE: Optum SNF authorization request form"

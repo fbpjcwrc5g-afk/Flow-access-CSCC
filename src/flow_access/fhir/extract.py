@@ -1,5 +1,6 @@
 """Helpers for pulling the fields we need out of Epic FHIR R4 resources."""
 
+import re
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -79,6 +80,16 @@ def coverage_text(coverage: Resource) -> str:
     parts = [coverage_payor(coverage), coverage_plan(coverage), coverage.get("type", {}).get("text")]
     parts += [c.get("display") for c in coverage.get("type", {}).get("coding", [])]
     return " | ".join(p for p in parts if p)
+
+
+def keyword_matcher(words: list[str]) -> list[tuple[str, re.Pattern]]:
+    """Compile case-insensitive whole-word patterns for keyword matching."""
+    return [(w, re.compile(rf"(?<![a-z0-9]){re.escape(w.lower())}(?![a-z0-9])")) for w in words]
+
+
+def find_keyword(text: str, matcher: list[tuple[str, re.Pattern]]) -> str | None:
+    lowered = text.lower()
+    return next((word for word, pattern in matcher if pattern.search(lowered)), None)
 
 
 def encounter_class_code(encounter: Resource) -> str | None:

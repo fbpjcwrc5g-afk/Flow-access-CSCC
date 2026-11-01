@@ -6,7 +6,14 @@ from typing import Any
 
 import yaml
 
-from .fhir.extract import coverage_is_active, coverage_payor, coverage_plan, coverage_text
+from .fhir.extract import (
+    coverage_is_active,
+    coverage_payor,
+    coverage_plan,
+    coverage_text,
+    find_keyword,
+    keyword_matcher,
+)
 from .models import CoverageClassification, Pathway, PathwayDetermination
 
 Resource = dict[str, Any]
@@ -21,9 +28,7 @@ class PathwayClassifier:
         for block in rules.get("coding_systems", []):
             codes = {str(code): Pathway(p) for code, p in block["codes"].items()}
             self.coding_systems.append((set(block["systems"]), block.get("match", "exact"), codes))
-        self.keywords = [
-            (Pathway(k["pathway"]), [w.lower() for w in k["any"]]) for k in rules.get("keywords", [])
-        ]
+        self.keywords = [(Pathway(k["pathway"]), keyword_matcher(k["any"])) for k in rules.get("keywords", [])]
         self.combine_dual = rules.get("combine_medicare_and_medicaid_as_dual", True)
 
     @classmethod
@@ -56,11 +61,10 @@ class PathwayClassifier:
                 return CoverageClassification(
                     **base, pathway=pathway, matched_by="coding", evidence=f"{coding['system']}|{coding['code']}"
                 )
-        text = coverage_text(coverage).lower()
-        for pathway, words in self.keywords:
-            for word in words:
-                if word in text:
-                    return CoverageClassification(**base, pathway=pathway, matched_by="keyword", evidence=word)
+        text = coverage_text(coverage)
+        for pathway, matcher in self.keywords:
+            if word := find_keyword(text, matcher):
+                return CoverageClassification(**base, pathway=pathway, matched_by="keyword", evidence=word)
         return CoverageClassification(**base, pathway=Pathway.UNKNOWN, matched_by="unmatched")
 
     def determine(self, coverages: list[Resource], as_of: datetime | None = None) -> PathwayDetermination:

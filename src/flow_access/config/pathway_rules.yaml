@@ -38,14 +38,25 @@ coding_systems:
       SUBSIDFFS: medicaid
       SUBSIDMC: medicaid_managed_care
 
-# Checked in order; the first pathway with a matching keyword wins. Matching is case-insensitive.
+# Checked in order; the first pathway with a matching keyword wins. Matching is case-insensitive
+# and on whole words ("la care" does not match "villa care").
+#
+# Local plans (L.A. Care, Blue Shield Promise, Molina) offer several product lines. Product-specific
+# names are listed before the plan names so that, for example, a Molina D-SNP is not classified as
+# Medi-Cal. CONFIGURE: confirm product names against how they are built in your Epic payor/plan records.
 keywords:
   - pathway: dual_eligible
-    any: ["d-snp", "dsnp", "dual eligible", "dual complete", "medi-medi", "medicare-medicaid"]
+    any: ["d-snp", "dsnp", "dual eligible", "dual complete", "medi-medi", "medicare-medicaid",
+          "l.a. care medicare plus", "la care medicare plus", "medicare complete care"]
   - pathway: medicare_advantage
-    any: ["medicare advantage", "medicare hmo", "medicare ppo", "medicare replacement", "senior advantage", "medicare part c"]
+    any: ["medicare advantage", "medicare hmo", "medicare ppo", "medicare replacement", "senior advantage",
+          "medicare part c", "molina medicare"]
+  - pathway: commercial
+    any: ["covered california", "l.a. care covered", "la care covered", "molina marketplace"]
   - pathway: medicaid_managed_care
-    any: ["medicaid managed", "medicaid hmo", "medicaid mco", "community plan", "medi-cal managed"]
+    any: ["medicaid managed", "medicaid hmo", "medicaid mco", "community plan", "medi-cal managed",
+          "l.a. care", "la care", "lacare", "blue shield promise", "blue shield of california promise",
+          "molina"]
   - pathway: medicaid
     any: ["medicaid", "medi-cal", "masshealth", "apple health", "tenncare", "badgercare", "soonercare", "ahcccs"]
   - pathway: medicare_traditional
