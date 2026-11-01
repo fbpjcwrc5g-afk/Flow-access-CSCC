@@ -1,0 +1,58 @@
+# Coded findings that support the functional-limitation section of the PCS form.
+#
+# Only findings coded in the chart are cited, so the draft never invents a limitation. If no criteria
+# match, the justification is left for the prescriber to write and no mode is recommended.
+# `minimum_mode` is the lowest Medi-Cal NEMT level the finding usually supports. The prescriber always
+# makes the final selection. Order of modes: wheelchair_van < litter_van < ambulance.
+#
+# Review with your medical director / utilization management before production use.
+
+modes:
+  wheelchair_van: Wheelchair van
+  litter_van: Litter van (gurney)
+  ambulance: Ambulance
+  air: Air ambulance
+
+criteria:
+  - id: ventilator_dependent
+    icd10_prefixes: ["Z99.11"]
+    minimum_mode: ambulance
+    statement: "Ventilator dependent ({code}); requires respiratory support and monitoring during transport."
+  - id: bed_confined
+    icd10_prefixes: ["Z74.01"]
+    minimum_mode: litter_van
+    statement: "Bed confinement status ({code}); unable to sit upright in a wheelchair for the duration of transport."
+  - id: wheelchair_dependent
+    icd10_prefixes: ["Z99.3"]
+    minimum_mode: wheelchair_van
+    statement: "Dependent on wheelchair ({code}); unable to ambulate to or board public or private transportation."
+  - id: paralysis
+    icd10_prefixes: ["G81", "G82", "G83"]
+    minimum_mode: wheelchair_van
+    statement: "{display} ({code}) limits independent mobility and transfers."
+  - id: lower_limb_amputation
+    icd10_prefixes: ["Z89.5", "Z89.6"]
+    minimum_mode: wheelchair_van
+    statement: "Acquired absence of lower limb ({code}); unable to safely ambulate without assistance."
+  - id: femur_fracture
+    icd10_prefixes: ["S72"]
+    minimum_mode: wheelchair_van
+    statement: "{display} ({code}) with weight-bearing and mobility restrictions."
+  - id: oxygen_dependent
+    icd10_prefixes: ["Z99.81"]
+    statement: "Dependent on supplemental oxygen ({code}); oxygen must be accommodated during transport."
+  - id: cognitive_impairment
+    icd10_prefixes: ["F01", "F02", "F03", "G30"]
+    statement: "{display} ({code}); cannot travel independently or safely navigate public transportation."
+  - id: bariatric
+    icd10_prefixes: ["E66.01", "Z68.41", "Z68.42", "Z68.43", "Z68.44", "Z68.45"]
+    statement: "{display} ({code}); may require bariatric-capable vehicle and equipment."
+  - id: dialysis
+    icd10_prefixes: ["Z99.2", "N18.6"]
+    statement: "{display} ({code}); requires recurring transportation to dialysis."
+  - id: gait_fall_risk
+    icd10_prefixes: ["R26", "Z91.81"]
+    statement: "{display} ({code}); high risk of falls when ambulating."
+  - id: neuro_degenerative
+    icd10_prefixes: ["G20", "G35", "G12.21"]
+    statement: "{display} ({code}) with progressive functional decline."

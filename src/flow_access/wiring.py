@@ -1,6 +1,9 @@
+from .clinical import TransportCriteria
 from .fhir.auth import BackendServicesAuth
 from .fhir.client import FhirClient
+from .packets import PacketBuilder
 from .pathway import PathwayClassifier
+from .plans import PlanDirectory
 from .service import PathwayService
 from .settings import Settings
 from .sinks import FhirTaskSink, LogSink, TaskSink, WebhookSink
@@ -43,5 +46,13 @@ def build_service(settings: Settings, auth: BackendServicesAuth | None = None) -
         engine=WorkflowEngine(load_rules(settings.workflow_rules_path)),
         store=Store(settings.db_path),
         sinks=sinks,
+        packets=build_packet_builder(settings),
         fhir=fhir,
+    )
+
+
+def build_packet_builder(settings: Settings) -> PacketBuilder:
+    return PacketBuilder(
+        PlanDirectory.from_files(settings.plans_path, settings.agencies_path),
+        TransportCriteria.from_file(settings.transport_criteria_path),
     )

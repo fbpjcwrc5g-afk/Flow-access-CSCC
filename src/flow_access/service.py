@@ -5,10 +5,13 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
-from .fhir.client import FhirClient
+from .clinical import ACTIVE_ORDER_STATUSES
+from .fhir.client import FhirClient, FhirError
 from .fhir.extract import ref_id
-from .models import ClinicalEvent, EventType, Evaluation, PatientContext
+from .models import CaseManagerTask, ClinicalEvent, EventType, Evaluation, NeedType, PatientContext, PlanMatch
+from .packets import CarePacket, PacketBuilder
 from .pathway import PathwayClassifier
+from .pcs import TransportRequest
 from .sinks import TaskSink
 from .store import Store
 from .workflows import WorkflowEngine, encounter_events
@@ -26,12 +29,14 @@ class PathwayService:
         engine: WorkflowEngine,
         store: Store,
         sinks: list[TaskSink],
+        packets: PacketBuilder,
         fhir: FhirClient | None = None,
     ):
         self.classifier = classifier
         self.engine = engine
         self.store = store
         self.sinks = sinks
+        self.packets = packets
         self.fhir = fhir
 
     def evaluate(
@@ -39,22 +44,43 @@ class PathwayService:
     ) -> Evaluation:
         now = now or datetime.now(timezone.utc)
         determination = self.classifier.determine(context.coverages, as_of=now)
+        plans = self.packets.directory.match(context.coverages, as_of=now)
 
         events = [e for enc in context.encounters for e in encounter_events(enc)]
+        events += self.packets.detector.events(context.service_requests)
         if dispatch:
             previous = self.store.swap_pathway(context.patient_id, determination.pathway)
             if previous is not None and previous != determination.pathway:
                 events.append(ClinicalEvent(type=EventType.PATHWAY_CHANGED, occurred_at=now))
 
-        tasks = self.engine.tasks_for(context, determination, events, now=now)
+        tasks = self.engine.tasks_for(context, determination, events, plans=plans, now=now)
+        self._attach_details(context, plans, tasks, now)
         evaluation = Evaluation(
-            patient_id=context.patient_id, determination=determination, events=events, tasks=tasks
+            patient_id=context.patient_id, determination=determination, plans=plans, events=events, tasks=tasks
         )
         if dispatch:
             for task in tasks:
                 if self._dispatch(task):
                     evaluation.dispatched.append(task.dedup_key)
         return evaluation
+
+    def _attach_details(
+        self, context: PatientContext, plans: list[PlanMatch], tasks: list[CaseManagerTask], now: datetime
+    ) -> None:
+        profile = self.packets.directory.managing_profile(plans)
+        for task in tasks:
+            if task.need:
+                order_ids = [task.order_id] if task.order_id else []
+                packet = self.packets.need_packet(
+                    context, plans, profile, task.need, order_ids, encounter_id=task.encounter_id, now=now
+                )
+                task.details = self.packets.task_details(packet)
+            elif plans and task.event in (EventType.INPATIENT_ADMISSION, EventType.OBSERVATION_START):
+                task.details = {
+                    "plans": [p.model_dump(exclude_none=True) for p in plans],
+                    "managing_entity": profile.display_name if profile else None,
+                    "authorization_contact": profile.authorization_contact if profile else "",
+                }
 
     def _dispatch(self, task) -> bool:
         if not self.store.claim_task(task):
@@ -83,11 +109,48 @@ class PathwayService:
         encounters: list[Resource] | None = None,
     ) -> PatientContext:
         fhir = self._require_fhir()
+        conditions: dict[str, Resource] = {}
+        for category in ("encounter-diagnosis", "problem-list-item"):
+            for cond in self._optional_search("Condition", {"patient": patient_id, "category": category}):
+                conditions.setdefault(cond.get("id"), cond)
+        orders = [
+            o for o in self._optional_search("ServiceRequest", {"patient": patient_id})
+            if o.get("status") in ACTIVE_ORDER_STATUSES
+        ]
+        practitioners = []
+        for pid in sorted({p for o in orders if (p := ref_id(o.get("requester"), "Practitioner"))}):
+            try:
+                practitioners.append(fhir.read("Practitioner", pid))
+            except FhirError as exc:
+                log.warning("Could not read Practitioner (HTTP %s); PCS prescriber left blank", exc.status_code)
         return PatientContext(
             patient=fhir.read("Patient", patient_id),
             coverages=list(fhir.search("Coverage", {"patient": patient_id})),
             encounters=(encounters or []) + [fhir.read("Encounter", eid) for eid in encounter_ids or []],
+            conditions=list(conditions.values()),
+            service_requests=orders,
+            practitioners=practitioners,
         )
+
+    def _optional_search(self, resource_type: str, params: dict[str, str]) -> list[Resource]:
+        """Search data that enriches packets; a missing scope should not block pathway workflows."""
+        try:
+            return list(self._require_fhir().search(resource_type, params))
+        except FhirError as exc:
+            log.warning("%s search failed (HTTP %s); continuing without it", resource_type, exc.status_code)
+            return []
+
+    def build_packet(
+        self,
+        context: PatientContext,
+        needs: list[NeedType] | None = None,
+        transport: TransportRequest | None = None,
+        encounter_id: str | None = None,
+        now: datetime | None = None,
+    ) -> CarePacket:
+        determination = self.classifier.determine(context.coverages, as_of=now)
+        plans = self.packets.directory.match(context.coverages, as_of=now)
+        return self.packets.build(context, determination.pathway, plans, needs, transport, encounter_id, now)
 
     def evaluate_patient(self, patient_id: str, encounter_ids: list[str] | None = None) -> Evaluation:
         return self.evaluate(self.fetch_context(patient_id, encounter_ids))
@@ -113,6 +176,11 @@ class PathwayService:
                 pid = ref_id(resource.get("beneficiary"), "Patient")
                 if pid:
                     patients.add(pid)
+            elif resource_type == "ServiceRequest":
+                resource = resource or fhir.read("ServiceRequest", resource_id)
+                pid = ref_id(resource.get("subject"), "Patient")
+                if pid:
+                    patients.add(pid)
 
         return [
             self.evaluate(self.fetch_context(pid, encounters=encounters_by_patient.get(pid)))
@@ -125,13 +193,11 @@ class PathwayService:
         since = self.store.get_cursor(BULK_CURSOR)
         manifest = fhir.bulk_export(group_id, ["Patient", "Encounter", "Coverage"], since=since)
 
-        patients: dict[str, Resource] = {}
         encounters: dict[str, list[Resource]] = defaultdict(list)
         changed: set[str] = set()
         for resource in fhir.iter_bulk_output(manifest):
             rtype = resource.get("resourceType")
             if rtype == "Patient":
-                patients[resource["id"]] = resource
                 changed.add(resource["id"])
             elif rtype == "Encounter" and (pid := ref_id(resource.get("subject"), "Patient")):
                 encounters[pid].append(resource)
@@ -139,15 +205,10 @@ class PathwayService:
             elif rtype == "Coverage" and (pid := ref_id(resource.get("beneficiary"), "Patient")):
                 changed.add(pid)
 
-        evaluations = []
-        for pid in sorted(changed):
-            # An incremental export omits unchanged Coverage, so always fetch the full current set.
-            context = PatientContext(
-                patient=patients.get(pid) or fhir.read("Patient", pid),
-                coverages=list(fhir.search("Coverage", {"patient": pid})),
-                encounters=encounters.get(pid, []),
-            )
-            evaluations.append(self.evaluate(context))
+        # An incremental export omits unchanged Coverage, orders, and diagnoses, so fetch the current set.
+        evaluations = [
+            self.evaluate(self.fetch_context(pid, encounters=encounters.get(pid, []))) for pid in sorted(changed)
+        ]
 
         if manifest.get("transactionTime"):
             self.store.set_cursor(BULK_CURSOR, manifest["transactionTime"])
@@ -159,14 +220,14 @@ def parse_notification(payload: Resource) -> list[tuple[str, str, Resource | Non
 
     Supported:
       * FHIR R4 Subscriptions Backport notification Bundles (focus references and/or full resources)
-      * A bare FHIR resource (Encounter, Coverage, Patient)
+      * A bare FHIR resource (Encounter, Coverage, Patient, ServiceRequest)
       * A simple JSON body: {"patient_id": "...", "encounter_id": "..."}, e.g. from an
         integration engine translating HL7v2 ADT messages.
     """
     found: dict[tuple[str, str], Resource | None] = {}
 
     def add(rtype: str | None, rid: str | None, resource: Resource | None = None):
-        if rtype in {"Patient", "Encounter", "Coverage"} and rid:
+        if rtype in {"Patient", "Encounter", "Coverage", "ServiceRequest"} and rid:
             found[(rtype, rid)] = resource or found.get((rtype, rid))
 
     def add_ref(ref: dict | None):

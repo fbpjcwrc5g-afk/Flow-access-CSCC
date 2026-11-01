@@ -119,6 +119,63 @@ rules:
     priority: high
     due_within_hours: 12
 
+  # --- Plan-specific post-acute planning (L.A. Care, Blue Shield Promise, Molina, Optum) ---------
+  # Tasks below carry `details` with the plan's required documents, contracted agencies, and (for
+  # transportation) the pre-filled PCS form summary. The full packet is available from
+  # GET /patients/{id}/packet and the PCS form from POST /patients/{id}/pcs.
+
+  - id: plan-discharge-planning
+    title: Start health plan discharge planning packet
+    description: >
+      Patient is covered by a priority health plan or delegated medical group. Review the plan's
+      required documents and contracted home health, SNF, and DME network, and notify the plan's
+      utilization management contact of the admission.
+    plans: [la_care, blue_shield_promise, molina, optum]
+    events: [inpatient_admission, observation_start]
+    priority: high
+    due_within_hours: 24
+
+  - id: home-health-referral
+    title: Send home health referral to a contracted agency
+    description: >
+      Home health was ordered. Send the referral with the required documents to an agency in the
+      patient's plan network and request authorization.
+    events: [post_acute_need]
+    needs: [home_health]
+    priority: high
+    due_within_hours: 24
+
+  - id: snf-referral
+    title: Send SNF referrals and authorization request
+    description: >
+      Skilled nursing placement was ordered. Send referral packets to contracted SNFs and submit the
+      authorization request to the plan or delegated medical group.
+    events: [post_acute_need]
+    needs: [snf]
+    priority: high
+    due_within_hours: 24
+
+  - id: dme-order
+    title: Order DME from a contracted supplier
+    description: >
+      Durable medical equipment was ordered. Send the signed order and supporting documentation to a
+      contracted supplier and obtain authorization before discharge.
+    events: [post_acute_need]
+    needs: [dme]
+    priority: high
+    due_within_hours: 24
+
+  - id: pcs-transport
+    title: Obtain prescriber signature on pre-filled PCS form
+    description: >
+      Non-emergency medical transportation was ordered. Review the pre-filled Physician Certification
+      Statement with the prescriber, confirm the mode and justification, obtain signature, and submit
+      it to the plan's transportation vendor.
+    events: [post_acute_need]
+    needs: [transportation]
+    priority: high
+    due_within_hours: 12
+
   - id: pathway-change-review
     title: Review insurance pathway change
     description: >

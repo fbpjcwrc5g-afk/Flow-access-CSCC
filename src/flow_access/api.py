@@ -1,11 +1,15 @@
 import hmac
 import logging
+from enum import StrEnum
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
 from .fhir.auth import BackendServicesAuth
-from .models import CaseManagerTask, Evaluation, PatientContext
+from .models import CaseManagerTask, Evaluation, NeedType, PatientContext
+from .packets import CarePacket
+from .pcs import TransportRequest, fill_pdf, render_html
 from .service import PathwayService
 from .settings import Settings, get_settings
 from .wiring import build_auth, build_service
@@ -16,6 +20,22 @@ log = logging.getLogger(__name__)
 class BundleRequest(BaseModel):
     bundle: dict
     dispatch: bool = False
+
+
+class PacketRequest(BaseModel):
+    needs: list[NeedType] | None = None
+    transport: TransportRequest | None = None
+    encounter_id: str | None = None
+
+
+class BundlePacketRequest(PacketRequest):
+    bundle: dict
+
+
+class PcsFormat(StrEnum):
+    JSON = "json"
+    HTML = "html"
+    PDF = "pdf"
 
 
 def create_app(settings: Settings | None = None, service: PathwayService | None = None,
@@ -78,6 +98,55 @@ def create_app(settings: Settings | None = None, service: PathwayService | None 
     def list_tasks(patient_id: str | None = None, limit: int = Query(default=100, le=1000)):
         return service.store.list_tasks(patient_id, limit)
 
+    def live_context(patient_id: str) -> PatientContext:
+        if not service.fhir:
+            raise HTTPException(503, "Epic FHIR connection is not configured")
+        return service.fetch_context(patient_id)
+
+    def bundle_context(bundle: dict) -> PatientContext:
+        try:
+            return context_from_bundle(bundle)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.post("/patients/{patient_id}/packet", response_model=CarePacket)
+    def patient_packet(patient_id: str, request: PacketRequest | None = None) -> CarePacket:
+        """Plan-specific documents, contracted agencies, and PCS draft for the patient's post-acute needs."""
+        request = request or PacketRequest()
+        return service.build_packet(live_context(patient_id), request.needs, request.transport, request.encounter_id)
+
+    @app.post("/packet/bundle", response_model=CarePacket)
+    def bundle_packet(request: BundlePacketRequest) -> CarePacket:
+        return service.build_packet(
+            bundle_context(request.bundle), request.needs, request.transport, request.encounter_id
+        )
+
+    @app.post("/patients/{patient_id}/pcs")
+    def patient_pcs(patient_id: str, request: PacketRequest | None = None, format: PcsFormat = PcsFormat.HTML):
+        """Pre-filled PCS transportation form (DRAFT until the prescriber reviews and signs)."""
+        request = request or PacketRequest()
+        return render_pcs(live_context(patient_id), request, format)
+
+    @app.post("/pcs/bundle")
+    def bundle_pcs(request: BundlePacketRequest, format: PcsFormat = PcsFormat.HTML):
+        return render_pcs(bundle_context(request.bundle), request, format)
+
+    def render_pcs(context: PatientContext, request: PacketRequest, fmt: PcsFormat) -> Response:
+        packet = service.build_packet(context, [NeedType.TRANSPORTATION], request.transport, request.encounter_id)
+        form = packet.needs[0].pcs_form
+        if fmt == PcsFormat.JSON:
+            return Response(form.model_dump_json(), media_type="application/json")
+        if fmt == PcsFormat.HTML:
+            return HTMLResponse(render_html(form))
+        profile = service.packets.directory.managing_profile(packet.plans)
+        if not profile or not profile.pcs_form.template_pdf or not profile.pcs_form.field_map:
+            raise HTTPException(
+                409, "No fillable PCS PDF is configured for this plan; use format=html and print to PDF."
+            )
+        pdf = fill_pdf(form, profile.pcs_form.template_pdf, profile.pcs_form.field_map)
+        return Response(pdf, media_type="application/pdf",
+                        headers={"Content-Disposition": f'inline; filename="pcs-{context.patient_id}.pdf"'})
+
     return app
 
 
@@ -86,8 +155,15 @@ def context_from_bundle(bundle: dict) -> PatientContext:
     patients = [r for r in resources if r.get("resourceType") == "Patient"]
     if len(patients) != 1:
         raise ValueError("Bundle must contain exactly one Patient resource")
+
+    def of(rtype: str) -> list[dict]:
+        return [r for r in resources if r.get("resourceType") == rtype]
+
     return PatientContext(
         patient=patients[0],
-        coverages=[r for r in resources if r.get("resourceType") == "Coverage"],
-        encounters=[r for r in resources if r.get("resourceType") == "Encounter"],
+        coverages=of("Coverage"),
+        encounters=of("Encounter"),
+        conditions=of("Condition"),
+        service_requests=of("ServiceRequest"),
+        practitioners=of("Practitioner"),
     )

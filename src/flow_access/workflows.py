@@ -12,9 +12,11 @@ from .models import (
     CaseManagerTask,
     ClinicalEvent,
     EventType,
+    NeedType,
     Pathway,
     PathwayDetermination,
     PatientContext,
+    PlanMatch,
 )
 
 Resource = dict[str, Any]
@@ -32,12 +34,20 @@ class WorkflowRule(BaseModel):
     description: str
     events: list[EventType]
     pathways: list[Pathway] | None = None
+    # Plan profile ids from plans.yaml; the rule fires if the patient matches any of them.
+    plans: list[str] | None = None
+    needs: list[NeedType] | None = None
     priority: str = "normal"
     assignee_role: str = "rn_case_manager"
     due_within_hours: float | None = None
 
-    def matches(self, pathway: Pathway, event: EventType) -> bool:
-        return event in self.events and (self.pathways is None or pathway in self.pathways)
+    def matches(self, pathway: Pathway, event: ClinicalEvent, plan_ids: list[str]) -> bool:
+        return (
+            event.type in self.events
+            and (self.pathways is None or pathway in self.pathways)
+            and (self.plans is None or bool(set(self.plans) & set(plan_ids)))
+            and (self.needs is None or event.need in self.needs)
+        )
 
 
 def load_rules(path: Path) -> list[WorkflowRule]:
@@ -72,18 +82,23 @@ class WorkflowEngine:
         context: PatientContext,
         determination: PathwayDetermination,
         events: list[ClinicalEvent],
+        plans: list[PlanMatch] | None = None,
         now: datetime | None = None,
     ) -> list[CaseManagerTask]:
         now = now or datetime.now(timezone.utc)
         mrn = patient_mrn(context.patient)
         payor = determination.primary.payor if determination.primary else None
+        plan_ids = [p.plan_id for p in plans or []]
         tasks = []
         for event in events:
             for rule in self.rules:
-                if not rule.matches(determination.pathway, event.type):
+                if not rule.matches(determination.pathway, event, plan_ids):
                     continue
                 anchor = event.occurred_at or now
-                scope = event.encounter_id or f"pathway:{determination.pathway.value}"
+                if event.source_id:
+                    scope = f"order:{event.source_id}"
+                else:
+                    scope = event.encounter_id or f"pathway:{determination.pathway.value}"
                 tasks.append(
                     CaseManagerTask(
                         dedup_key=f"{rule.id}|{context.patient_id}|{scope}",
@@ -97,7 +112,10 @@ class WorkflowEngine:
                         encounter_id=event.encounter_id,
                         pathway=determination.pathway,
                         payor=payor,
+                        plan_ids=plan_ids,
                         event=event.type,
+                        need=event.need,
+                        order_id=event.source_id,
                         due_at=anchor + timedelta(hours=rule.due_within_hours)
                         if rule.due_within_hours is not None
                         else None,

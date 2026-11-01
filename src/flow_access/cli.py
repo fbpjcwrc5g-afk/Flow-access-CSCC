@@ -21,6 +21,10 @@ def main(argv: list[str] | None = None) -> int:
     evaluate = sub.add_parser("evaluate", help="Evaluate a FHIR Bundle file offline (dry run)")
     evaluate.add_argument("bundle", type=Path)
 
+    packet = sub.add_parser("packet", help="Build the plan referral packet and PCS form for a FHIR Bundle file")
+    packet.add_argument("bundle", type=Path)
+    packet.add_argument("--pcs-html", type=Path, help="Also write the pre-filled PCS form as printable HTML")
+
     keygen = sub.add_parser("generate-key", help="Create an RSA key pair for Epic backend services")
     keygen.add_argument("--out", type=Path, default=Path("epic_private_key.pem"))
 
@@ -37,6 +41,8 @@ def main(argv: list[str] | None = None) -> int:
         return _poll(args.once, args.interval)
     elif args.command == "evaluate":
         return _evaluate(args.bundle)
+    elif args.command == "packet":
+        return _packet(args.bundle, args.pcs_html)
     elif args.command == "generate-key":
         return _generate_key(args.out)
     return 0
@@ -65,26 +71,36 @@ def _poll(once: bool, interval: int) -> int:
         time.sleep(interval)
 
 
+def _offline_service():
+    from .settings import get_settings
+    from .wiring import build_service
+
+    settings = get_settings().model_copy(
+        update={"db_path": ":memory:", "task_sinks": "", "epic_fhir_base_url": ""}
+    )
+    return build_service(settings)
+
+
 def _evaluate(bundle_path: Path) -> int:
     from .api import context_from_bundle
-    from .pathway import PathwayClassifier
-    from .settings import get_settings
-    from .workflows import WorkflowEngine, encounter_events, load_rules
 
-    settings = get_settings()
     context = context_from_bundle(json.loads(bundle_path.read_text()))
-    determination = PathwayClassifier.from_file(settings.pathway_rules_path).determine(context.coverages)
-    events = [e for enc in context.encounters for e in encounter_events(enc)]
-    tasks = WorkflowEngine(load_rules(settings.workflow_rules_path)).tasks_for(context, determination, events)
-    print(json.dumps(
-        {
-            "patient_id": context.patient_id,
-            "determination": determination.model_dump(mode="json"),
-            "events": [e.model_dump(mode="json") for e in events],
-            "tasks": [t.model_dump(mode="json", exclude={"dedup_key"}) for t in tasks],
-        },
-        indent=2,
-    ))
+    evaluation = _offline_service().evaluate(context, dispatch=False)
+    print(evaluation.model_dump_json(indent=2, exclude={"tasks": {"__all__": {"dedup_key"}}}))
+    return 0
+
+
+def _packet(bundle_path: Path, pcs_html: Path | None) -> int:
+    from .api import context_from_bundle
+    from .pcs import render_html
+
+    context = context_from_bundle(json.loads(bundle_path.read_text()))
+    packet = _offline_service().build_packet(context)
+    print(packet.model_dump_json(indent=2))
+    if pcs_html:
+        form = next(n.pcs_form for n in packet.needs if n.pcs_form)
+        pcs_html.write_text(render_html(form))
+        print(f"Wrote PCS form to {pcs_html}", file=sys.stderr)
     return 0
 
 

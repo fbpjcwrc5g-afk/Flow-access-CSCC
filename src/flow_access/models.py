@@ -29,6 +29,14 @@ class EventType(StrEnum):
     OBSERVATION_START = "observation_start"
     EMERGENCY_VISIT = "emergency_visit"
     PATHWAY_CHANGED = "pathway_changed"
+    POST_ACUTE_NEED = "post_acute_need"
+
+
+class NeedType(StrEnum):
+    HOME_HEALTH = "home_health"
+    SNF = "snf"
+    DME = "dme"
+    TRANSPORTATION = "transportation"
 
 
 class CoverageClassification(BaseModel):
@@ -54,6 +62,18 @@ class ClinicalEvent(BaseModel):
     type: EventType
     encounter_id: str | None = None
     occurred_at: datetime | None = None
+    need: NeedType | None = None
+    # FHIR id of the order (ServiceRequest) that revealed a post-acute need.
+    source_id: str | None = None
+
+
+class PlanMatch(BaseModel):
+    plan_id: str
+    display_name: str
+    role: str  # "health_plan" or "delegated_group"
+    coverage_id: str | None = None
+    member_id: str | None = None
+    evidence: str
 
 
 class CaseManagerTask(BaseModel):
@@ -68,14 +88,20 @@ class CaseManagerTask(BaseModel):
     encounter_id: str | None = None
     pathway: Pathway
     payor: str | None = None
+    plan_ids: list[str] = Field(default_factory=list)
     event: EventType
+    need: NeedType | None = None
+    order_id: str | None = None
     due_at: datetime | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # Plan-specific referral details: required documents, contracted agencies, PCS form status.
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class Evaluation(BaseModel):
     patient_id: str
     determination: PathwayDetermination
+    plans: list[PlanMatch] = Field(default_factory=list)
     events: list[ClinicalEvent]
     tasks: list[CaseManagerTask]
     dispatched: list[str] = Field(default_factory=list)  # dedup keys newly dispatched
@@ -87,6 +113,9 @@ class PatientContext(BaseModel):
     patient: Resource
     coverages: list[Resource] = Field(default_factory=list)
     encounters: list[Resource] = Field(default_factory=list)
+    conditions: list[Resource] = Field(default_factory=list)
+    service_requests: list[Resource] = Field(default_factory=list)
+    practitioners: list[Resource] = Field(default_factory=list)
 
     @property
     def patient_id(self) -> str:

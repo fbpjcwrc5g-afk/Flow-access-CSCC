@@ -16,10 +16,12 @@ dependencies = [
     "pydantic-settings>=2.2",
     "pyjwt[crypto]>=2.8",
     "pyyaml>=6.0",
+    "jinja2>=3.1",
+    "pypdf>=4.0",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "reportlab>=4.0"]
 
 [project.scripts]
 flow-access = "flow_access.cli:main"
@@ -28,7 +30,7 @@ flow-access = "flow_access.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-flow_access = ["config/*.yaml"]
+flow_access = ["config/*.yaml", "config/*.csv", "templates/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
