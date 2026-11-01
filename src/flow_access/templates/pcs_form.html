@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ form.form_name }}</title>
+<style>
+  body { font: 12px/1.45 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; color: #111; max-width: 820px; margin: 24px auto; padding: 0 24px; }
+  h1 { font-size: 18px; margin: 0; }
+  .plan { color: #444; margin: 2px 0 10px; }
+  .draft { border: 2px solid #b45309; background: #fffbeb; color: #92400e; padding: 8px 10px; font-weight: 600; margin-bottom: 14px; }
+  section { border: 1px solid #999; margin-bottom: 10px; }
+  section h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; background: #eee; margin: 0; padding: 4px 8px; border-bottom: 1px solid #999; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .field { padding: 5px 8px; border-right: 1px solid #ddd; border-bottom: 1px solid #ddd; min-height: 30px; }
+  .field label { display: block; font-size: 10px; color: #555; text-transform: uppercase; }
+  .wide { grid-column: span 3; }
+  .two { grid-column: span 2; }
+  .body { padding: 8px; }
+  .blank { color: #b91c1c; font-style: italic; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { text-align: left; padding: 3px 8px; border-bottom: 1px solid #eee; }
+  .modes span { display: inline-block; margin-right: 18px; }
+  .sig { height: 36px; border-bottom: 1px solid #333; }
+  ul { margin: 4px 0; padding-left: 18px; }
+  @media print { .draft { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style>
+</head>
+<body>
+{% macro val(v) %}{% if v %}{{ v }}{% else %}<span class="blank">Required</span>{% endif %}{% endmacro %}
+<h1>{{ form.form_name }}</h1>
+<div class="plan">{{ form.plan_name or "Health plan not identified" }}: Non-Emergency Medical Transportation</div>
+<div class="draft">{{ form.status }}{% if form.missing %}. Still needed: {{ form.missing | join(", ") }}.{% endif %}</div>
+
+<section>
+  <h2>Member information</h2>
+  <div class="grid">
+    <div class="field two"><label>Member name</label>{{ val(form.patient.name) }}</div>
+    <div class="field"><label>Date of birth</label>{{ val(form.patient.birth_date) }}</div>
+    <div class="field"><label>Member ID (Medi-Cal CIN / plan ID)</label>{{ val(form.patient.member_id) }}</div>
+    <div class="field"><label>MRN</label>{{ form.patient.mrn }}</div>
+    <div class="field"><label>Phone</label>{{ form.patient.phone }}</div>
+    <div class="field wide"><label>Address</label>{{ form.patient.address }}</div>
+  </div>
+</section>
+
+<section>
+  <h2>Diagnoses (ICD-10-CM)</h2>
+  {% if form.diagnoses %}
+  <table>
+    {% for d in form.diagnoses %}<tr><td style="width:90px">{{ d.code }}</td><td>{{ d.display }}</td></tr>{% endfor %}
+  </table>
+  {% else %}<div class="body blank">Prescriber to enter diagnosis</div>{% endif %}
+</section>
+
+<section>
+  <h2>Functional limitations and clinical justification</h2>
+  <div class="body">{{ form.clinical_justification }}</div>
+</section>
+
+<section>
+  <h2>Transportation requested</h2>
+  <div class="grid">
+    <div class="field wide modes"><label>Mode of transportation{% if form.recommended_mode %} (suggested from chart: {{ form.recommended_mode | replace("_", " ") }}){% endif %}</label>
+      {% for key, label in [("ambulance", "Ambulance"), ("litter_van", "Litter van (gurney)"), ("wheelchair_van", "Wheelchair van"), ("air", "Air")] %}
+      <span>{% if form.mode == key %}&#9746;{% else %}&#9744;{% endif %} {{ label }}</span>
+      {% endfor %}
+    </div>
+    <div class="field"><label>Start date</label>{{ form.start_date }}</div>
+    <div class="field"><label>End date (max 12 months)</label>{{ form.end_date }}</div>
+    <div class="field"><label>Trip type</label>{{ form.trip_type | replace("_", " ") }}{% if form.frequency %}, {{ form.frequency }}{% endif %}</div>
+    <div class="field"><label>From</label>{{ form.origin }}</div>
+    <div class="field two"><label>To</label>{{ form.destination }}</div>
+    <div class="field wide"><label>Reason for transport</label>{{ form.reason }}</div>
+  </div>
+</section>
+
+<section>
+  <h2>Prescribing provider certification</h2>
+  <div class="grid">
+    <div class="field"><label>Provider name</label>{{ val(form.prescriber.name) }}</div>
+    <div class="field"><label>NPI</label>{{ val(form.prescriber.npi) }}</div>
+    <div class="field"><label>Phone</label>{{ form.prescriber.phone }}</div>
+    <div class="field wide body">{{ form.certification_statement }}</div>
+    <div class="field two"><label>Signature</label><div class="sig"></div></div>
+    <div class="field"><label>Date</label><div class="sig"></div></div>
+  </div>
+</section>
+</body>
+</html>

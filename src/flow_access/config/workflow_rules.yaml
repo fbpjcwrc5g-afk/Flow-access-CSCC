@@ -1,0 +1,186 @@
+# RN case manager workflow triggers.
+#
+# A rule fires when the patient's insurance pathway AND a clinical event both match.
+# `due_within_hours` is measured from the event time (admission start, discharge time, etc.).
+# Omitting `pathways` matches every pathway. Each rule fires at most once per patient + encounter.
+#
+# The regulatory timeframes below reflect common CMS requirements but MUST be reviewed by your
+# compliance and case management leadership before production use.
+
+rules:
+  - id: medicare-im-admission
+    title: Deliver Important Message from Medicare (IM)
+    description: >
+      Deliver and obtain signature on the CMS-R-193 Important Message from Medicare within
+      2 calendar days of inpatient admission. Applies to Original Medicare, Medicare Advantage,
+      and dual eligible beneficiaries.
+    pathways: [medicare_traditional, medicare_advantage, dual_eligible]
+    events: [inpatient_admission]
+    priority: urgent
+    due_within_hours: 48
+
+  - id: medicare-im-followup
+    title: Confirm follow-up IM before discharge
+    description: >
+      Confirm a follow-up copy of the IM was delivered no more than 2 calendar days before
+      discharge, and document appeal rights review.
+    pathways: [medicare_traditional, medicare_advantage, dual_eligible]
+    events: [inpatient_discharge]
+    priority: high
+    due_within_hours: 4
+
+  - id: medicare-moon-observation
+    title: Deliver MOON notice for observation stay
+    description: >
+      Deliver the Medicare Outpatient Observation Notice (CMS-10611) to patients receiving more
+      than 24 hours of observation services, no later than 36 hours after observation begins.
+    pathways: [medicare_traditional, medicare_advantage, dual_eligible]
+    events: [observation_start]
+    priority: high
+    due_within_hours: 36
+
+  - id: medicare-snf-planning
+    title: Begin discharge planning for post-acute needs
+    description: >
+      Assess post-acute needs. For Original Medicare, track the 3-midnight qualifying inpatient
+      stay for SNF coverage; review Medicare Advantage plan authorization rules for post-acute care.
+    pathways: [medicare_traditional, dual_eligible]
+    events: [inpatient_admission]
+    priority: normal
+    due_within_hours: 24
+
+  - id: managed-care-admission-notification
+    title: Notify health plan of admission and start concurrent review
+    description: >
+      Send admission notification to the health plan and obtain an authorization or reference
+      number. Schedule concurrent (utilization) review per plan requirements.
+    pathways: [medicare_advantage, medicaid_managed_care, commercial, military]
+    events: [inpatient_admission, observation_start]
+    priority: urgent
+    due_within_hours: 24
+
+  - id: medicaid-eligibility-verification
+    title: Verify Medicaid eligibility and coordinate benefits
+    description: >
+      Verify current Medicaid eligibility, identify the assigned MCO or care coordinator, and
+      screen for social determinants of health needs affecting discharge.
+    pathways: [medicaid, medicaid_managed_care, dual_eligible]
+    events: [inpatient_admission]
+    priority: high
+    due_within_hours: 24
+
+  - id: dual-benefit-coordination
+    title: Coordinate Medicare and Medicaid benefits
+    description: >
+      Confirm Medicare is billed as primary and Medicaid as secondary. Contact the D-SNP or
+      Medicaid care coordinator if one is assigned.
+    pathways: [dual_eligible]
+    events: [inpatient_admission, observation_start]
+    priority: normal
+    due_within_hours: 48
+
+  - id: veterans-notification
+    title: Notify VA of admission
+    description: >
+      Notify the VA within 72 hours of an emergency admission (VA Community Care) and confirm
+      authorization for continued stay.
+    pathways: [veterans]
+    events: [inpatient_admission, emergency_visit]
+    priority: urgent
+    due_within_hours: 72
+
+  - id: third-party-liability-intake
+    title: Collect claim and adjuster information
+    description: >
+      Obtain the workers' compensation or auto claim number, adjuster contact, and date of injury.
+      Confirm authorization for treatment.
+    pathways: [workers_comp, auto_liability]
+    events: [inpatient_admission, emergency_visit, observation_start]
+    priority: high
+    due_within_hours: 24
+
+  - id: financial-counseling-referral
+    title: Refer to financial counseling and screen for coverage
+    description: >
+      Refer the patient to financial counseling. Screen for Medicaid, presumptive eligibility,
+      Marketplace coverage, and charity care.
+    pathways: [self_pay]
+    events: [inpatient_admission, observation_start, emergency_visit]
+    priority: high
+    due_within_hours: 24
+
+  - id: coverage-verification
+    title: Verify insurance coverage with registration
+    description: >
+      The patient's coverage could not be classified with confidence. Work with patient access
+      to verify active coverage before the payer notification window closes.
+    pathways: [unknown]
+    events: [inpatient_admission, observation_start, emergency_visit]
+    priority: high
+    due_within_hours: 12
+
+  # --- Plan-specific post-acute planning (L.A. Care, Blue Shield Promise, Molina, Optum) ---------
+  # Tasks below carry `details` with the plan's required documents, contracted agencies, and (for
+  # transportation) the pre-filled PCS form summary. The full packet is available from
+  # GET /patients/{id}/packet and the PCS form from POST /patients/{id}/pcs.
+
+  - id: plan-discharge-planning
+    title: Start health plan discharge planning packet
+    description: >
+      Patient is covered by a priority health plan or delegated medical group. Review the plan's
+      required documents and contracted home health, SNF, and DME network, and notify the plan's
+      utilization management contact of the admission.
+    plans: [la_care, blue_shield_promise, molina, optum]
+    events: [inpatient_admission, observation_start]
+    priority: high
+    due_within_hours: 24
+
+  - id: home-health-referral
+    title: Send home health referral to a contracted agency
+    description: >
+      Home health was ordered. Send the referral with the required documents to an agency in the
+      patient's plan network and request authorization.
+    events: [post_acute_need]
+    needs: [home_health]
+    priority: high
+    due_within_hours: 24
+
+  - id: snf-referral
+    title: Send SNF referrals and authorization request
+    description: >
+      Skilled nursing placement was ordered. Send referral packets to contracted SNFs and submit the
+      authorization request to the plan or delegated medical group.
+    events: [post_acute_need]
+    needs: [snf]
+    priority: high
+    due_within_hours: 24
+
+  - id: dme-order
+    title: Order DME from a contracted supplier
+    description: >
+      Durable medical equipment was ordered. Send the signed order and supporting documentation to a
+      contracted supplier and obtain authorization before discharge.
+    events: [post_acute_need]
+    needs: [dme]
+    priority: high
+    due_within_hours: 24
+
+  - id: pcs-transport
+    title: Obtain prescriber signature on pre-filled PCS form
+    description: >
+      Non-emergency medical transportation was ordered. Review the pre-filled Physician Certification
+      Statement with the prescriber, confirm the mode and justification, obtain signature, and submit
+      it to the plan's transportation vendor.
+    events: [post_acute_need]
+    needs: [transportation]
+    priority: high
+    due_within_hours: 12
+
+  - id: pathway-change-review
+    title: Review insurance pathway change
+    description: >
+      The patient's insurance pathway changed. Re-evaluate open case management requirements
+      (notices, authorizations, discharge plan) for the new pathway.
+    events: [pathway_changed]
+    priority: normal
+    due_within_hours: 24

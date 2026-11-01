@@ -1,0 +1,13 @@
+plan_id,service,name,phone,fax,address,service_area,notes
+la_care,home_health,EXAMPLE Home Health Agency A (replace),000-000-0000,000-000-0000,,Los Angeles County,Replace with contracted agency
+la_care,snf,EXAMPLE Skilled Nursing Facility A (replace),000-000-0000,000-000-0000,,Los Angeles County,Replace with contracted facility
+la_care,dme,EXAMPLE DME Supplier A (replace),000-000-0000,000-000-0000,,Los Angeles County,Replace with contracted supplier
+blue_shield_promise,home_health,EXAMPLE Home Health Agency B (replace),000-000-0000,000-000-0000,,Los Angeles County,Replace with contracted agency
+blue_shield_promise,snf,EXAMPLE Skilled Nursing Facility B (replace),000-000-0000,000-000-0000,,Los Angeles County,Replace with contracted facility
+blue_shield_promise,dme,EXAMPLE DME Supplier B (replace),000-000-0000,000-000-0000,,Los Angeles County,Replace with contracted supplier
+molina,home_health,EXAMPLE Home Health Agency C (replace),000-000-0000,000-000-0000,,Los Angeles County,Replace with contracted agency
+molina,snf,EXAMPLE Skilled Nursing Facility C (replace),000-000-0000,000-000-0000,,Los Angeles County,Replace with contracted facility
+molina,dme,EXAMPLE DME Supplier C (replace),000-000-0000,000-000-0000,,Los Angeles County,Replace with contracted supplier
+optum,home_health,EXAMPLE Home Health Agency D (replace),000-000-0000,000-000-0000,,Los Angeles County,Replace with contracted agency
+optum,snf,EXAMPLE Skilled Nursing Facility D (replace),000-000-0000,000-000-0000,,Los Angeles County,Replace with contracted facility
+optum,dme,EXAMPLE DME Supplier D (replace),000-000-0000,000-000-0000,,Los Angeles County,Replace with contracted supplier
