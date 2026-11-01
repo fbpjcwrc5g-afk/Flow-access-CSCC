@@ -1,0 +1,39 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "eXbMln3hu0PfFrpv2HgVHyg3",
+        "identifier": [
+          {"type": {"text": "EPI"}, "value": "203711"},
+          {"type": {"coding": [{"system": "http://terminology.hl7.org/CodeSystem/v2-0203", "code": "MR"}], "text": "MRN"}, "value": "E3826"}
+        ]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Coverage",
+        "id": "eCov-MA-1",
+        "status": "active",
+        "order": 1,
+        "beneficiary": {"reference": "Patient/eXbMln3hu0PfFrpv2HgVHyg3"},
+        "payor": [{"reference": "Organization/eOrg-1", "display": "HUMANA"}],
+        "period": {"start": "2025-01-01"},
+        "type": {"coding": [{"system": "https://nahdo.org/sopt", "code": "111", "display": "Medicare HMO"}], "text": "Medicare Advantage"},
+        "class": [{"type": {"coding": [{"system": "http://terminology.hl7.org/CodeSystem/coverage-class", "code": "plan"}]}, "value": "H5216", "name": "HUMANA GOLD PLUS HMO"}]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Encounter",
+        "id": "eEnc-IP-77",
+        "status": "in-progress",
+        "class": {"system": "http://terminology.hl7.org/CodeSystem/v3-ActCode", "code": "IMP", "display": "inpatient encounter"},
+        "subject": {"reference": "Patient/eXbMln3hu0PfFrpv2HgVHyg3"},
+        "period": {"start": "2026-11-01T06:30:00Z"}
+      }
+    }
+  ]
+}
