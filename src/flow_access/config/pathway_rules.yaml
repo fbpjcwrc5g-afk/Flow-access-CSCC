@@ -1,0 +1,67 @@
+# How Coverage resources map to insurance pathways.
+#
+# Each active Coverage is classified on its own, first by coded Coverage.type values
+# (most reliable), then by keywords found in the payor name, plan/group names, and type text.
+# Review these lists with your revenue cycle / registration team: Epic financial classes and
+# payor naming vary between organizations.
+
+coding_systems:
+  # Source of Payment Typology (PHDSC/NAHDO). Matched by longest code prefix, e.g. "111" -> "11".
+  - systems:
+      - https://nahdo.org/sopt
+      - urn:oid:2.16.840.1.113883.3.221.5
+    match: prefix
+    codes:
+      "1": medicare_traditional
+      "11": medicare_advantage
+      "14": dual_eligible
+      "2": medicaid
+      "21": medicaid_managed_care
+      "3": government_other
+      "31": military
+      "32": veterans
+      "5": commercial
+      "6": commercial
+      "7": commercial
+      "8": self_pay
+      "95": workers_comp
+      "96": auto_liability
+
+  # HL7 v3 ActCode insurance policy codes.
+  - systems:
+      - http://terminology.hl7.org/CodeSystem/v3-ActCode
+    match: exact
+    codes:
+      WCBPOL: workers_comp
+      AUTOPOL: auto_liability
+      PAY: self_pay
+      SUBSIDFFS: medicaid
+      SUBSIDMC: medicaid_managed_care
+
+# Checked in order; the first pathway with a matching keyword wins. Matching is case-insensitive.
+keywords:
+  - pathway: dual_eligible
+    any: ["d-snp", "dsnp", "dual eligible", "dual complete", "medi-medi", "medicare-medicaid"]
+  - pathway: medicare_advantage
+    any: ["medicare advantage", "medicare hmo", "medicare ppo", "medicare replacement", "senior advantage", "medicare part c"]
+  - pathway: medicaid_managed_care
+    any: ["medicaid managed", "medicaid hmo", "medicaid mco", "community plan", "medi-cal managed"]
+  - pathway: medicaid
+    any: ["medicaid", "medi-cal", "masshealth", "apple health", "tenncare", "badgercare", "soonercare", "ahcccs"]
+  - pathway: medicare_traditional
+    any: ["medicare"]
+  - pathway: military
+    any: ["tricare", "champva"]
+  - pathway: veterans
+    any: ["veterans affairs", "va community care", "department of veterans"]
+  - pathway: workers_comp
+    any: ["workers comp", "workers' comp", "worker's comp", "workman's comp"]
+  - pathway: auto_liability
+    any: ["auto insurance", "motor vehicle", "auto liability", "no-fault", "personal injury protection"]
+  - pathway: self_pay
+    any: ["self pay", "self-pay", "selfpay", "uninsured", "no insurance"]
+  - pathway: commercial
+    any: ["commercial", "blue cross", "blue shield", "bcbs", "anthem", "aetna", "cigna", "unitedhealthcare", "united healthcare", "humana", "kaiser", "ppo", "hmo", "epo", "marketplace", "exchange"]
+
+# When Medicare and Medicaid coverage are both active, the patient is treated as dual eligible.
+combine_medicare_and_medicaid_as_dual: true
